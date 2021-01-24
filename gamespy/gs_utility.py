@@ -5,6 +5,7 @@
     Copyright (C) 2014 AdmiralCurtiss
     Copyright (C) 2014 msoucy
     Copyright (C) 2015 Sepalani
+    Copyright (C) 2020 EnergyCube
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as
@@ -23,10 +24,12 @@
 import base64
 import hashlib
 import time
+import os
 
 import other.utils as utils
 
-
+# For some unknown reason, we need to specify the absolute location of the file,
+# otherwise it will be impossible to read the file sometimes.
 def generate_secret_keys(filename="gslist.cfg"):
     """Generate list of secret keys based on a config file.
 
@@ -34,14 +37,29 @@ def generate_secret_keys(filename="gslist.cfg"):
     TODO: Parse the config file in a cleaner way. (ex: using CSV module)
     """
     secret_key_list = {}
-    with open(filename) as key_file:
-        for line in key_file.readlines():
-            # name = line[:54].strip()
-            # Probably won't do anything with the name for now.
-            id = line[54:54+19].strip()
-            key = line[54+19:].strip()
+    thisfolder = os.path.dirname(os.path.abspath(__file__))
+    parent = os.path.dirname(thisfolder) 
+    initfile = os.path.join(parent, filename)
+    try:
+        # Python 2
+        with open(initfile) as key_file:
+            for line in key_file.readlines():
+                # name = line[:54].strip()
+                # Probably won't do anything with the name for now.
+                id = line[54:54+19].strip()
+                key = line[54+19:].strip()
 
-            secret_key_list[id] = key
+                secret_key_list[id] = key
+    except:
+        # Python 3
+        with open(initfile, encoding='cp1252') as key_file:
+            for line in key_file.readlines():
+                # name = line[:54].strip()
+                # Probably won't do anything with the name for now.
+                id = line[54:54+19].strip()
+                key = line[54+19:].strip()
+
+                secret_key_list[id] = key
 
     return secret_key_list
 
@@ -52,16 +70,16 @@ def base64_encode(input):
     GameSpy uses a slightly modified version of base64 which replaces
     +/= with []_
     """
-    output = base64.b64encode(input).replace('+', '[') \
+    output = base64.b64encode(input.replace('+', '[') \
                                     .replace('/', ']') \
-                                    .replace('=', '_')
+                                    .replace('=', '_').encode())
     return output
 
 
 def base64_decode(input):
     """Decode input in base64 using GameSpy variant."""
-    output = base64.b64decode(input.replace('[', '+')
-                                   .replace(']', '/')
+    output = base64.b64decode(input.replace('[', '+') \
+                                   .replace(']', '/') \
                                    .replace('_', '='))
     return output
 
@@ -116,8 +134,13 @@ def prepare_rc4_base64(_key, _data):
         data = bytearray()
 
     data.append(0)
-
-    return base64.b64encode(buffer(data))
+ 
+    # buffer replaced by the better named memoryview in Python 3
+    try:
+        result = base64.b64encode(buffer(data))
+    except:
+        result = base64.b64encode(memoryview(data))
+    return result
 
 
 def parse_authtoken(authtoken, db):
@@ -178,7 +201,7 @@ def login_profile_via_parsed_authtoken(authtoken_parsed, db):
 def generate_response(challenge, ac_challenge, secretkey, authtoken):
     """Generate a challenge response."""
     md5 = hashlib.md5()
-    md5.update(ac_challenge)
+    md5.update(ac_challenge.encode())
 
     output = md5.hexdigest()
     output += ' ' * 0x30
@@ -188,7 +211,7 @@ def generate_response(challenge, ac_challenge, secretkey, authtoken):
     output += md5.hexdigest()
 
     md5_2 = hashlib.md5()
-    md5_2.update(output)
+    md5_2.update(output.encode())
 
     return md5_2.hexdigest()
 
@@ -202,7 +225,7 @@ def generate_proof(challenge, ac_challenge, secretkey, authtoken):
     Maybe combine the two functions later?
     """
     md5 = hashlib.md5()
-    md5.update(ac_challenge)
+    md5.update(ac_challenge.encode())
 
     output = md5.hexdigest()
     output += ' ' * 0x30
@@ -212,7 +235,7 @@ def generate_proof(challenge, ac_challenge, secretkey, authtoken):
     output += md5.hexdigest()
 
     md5_2 = hashlib.md5()
-    md5_2.update(output)
+    md5_2.update(output.encode())
 
     return md5_2.hexdigest()
 

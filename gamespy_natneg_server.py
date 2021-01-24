@@ -25,10 +25,16 @@
 """
 
 import logging
-import SocketServer
+try:
+    # Python 2
+    import SocketServer
+    import Queue
+except ImportError:
+    # Python 3 PEP8 guidelines (all lowercase for module names)
+    import socketserver as SocketServer
+    import queue as Queue
 import threading
 import time
-import Queue
 import gamespy.gs_utility as gs_utils
 import other.utils as utils
 import traceback
@@ -744,7 +750,7 @@ class GameSpyNatNegUDPServer(SocketServer.UDPServer):
 
         self.server_manager = GameSpyServerDatabase(
             address=dwc_config.get_ip_port('GameSpyManager'),
-            authkey=""
+            authkey="".encode()
         )
         self.server_manager.connect()
 

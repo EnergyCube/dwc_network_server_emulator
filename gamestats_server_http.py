@@ -22,8 +22,14 @@
 """
 
 import logging
-import urlparse
-import BaseHTTPServer
+try:
+    # Python 2
+    import BaseHTTPServer
+    import urlparse
+except ImportError:
+    from urllib.parse import urlparse
+    # Python 3 PEP8 guidelines (all lowercase for module names)
+    import http.server as BaseHTTPServer
 import traceback
 import os
 import hashlib
@@ -127,10 +133,13 @@ class GameStatsHTTPServer(BaseHTTPServer.HTTPServer):
         BaseHTTPServer.HTTPServer.__init__(self, server_address,
                                            RequestHandlerClass)
 
+    # For some unknown reason, we need to specify the absolute location of the file,
+    # otherwise it will be impossible to read the file sometimes.
     def parse_key_file(self, filename="gamestats.cfg"):
         gamelist = {}
-
-        with open(filename) as config_file:
+        thisfolder = os.path.dirname(os.path.abspath(__file__))
+        initfile = os.path.join(thisfolder, filename)
+        with open(initfile) as config_file:
             for line in config_file.readlines():
                 line, sep, comment = line.partition("#")
 

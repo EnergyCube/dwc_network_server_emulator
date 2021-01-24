@@ -67,7 +67,7 @@ class StatsPage(resource.Resource):
         self.stats = stats
 
     def render_GET(self, request):
-        if "/".join(request.postpath) == "json":
+        if b"/".join(request.postpath) == "json":
             raw = True
             force_update = True
         else:
@@ -98,7 +98,7 @@ class StatsPage(resource.Resource):
                                   if server_list[game])
             output += self.footer % (self.stats.get_last_update_time())
 
-        return output
+        return bytes(output, 'utf-8') 
 
 
 class InternalStatsServer(object):
@@ -117,8 +117,10 @@ class InternalStatsServer(object):
     def start(self):
         manager_address = dwc_config.get_ip_port('GameSpyManager')
         manager_password = ""
-        self.server_manager = GameSpyServerDatabase(address=manager_address,
-                                                    authkey=manager_password)
+        self.server_manager = GameSpyServerDatabase(
+            address=manager_address,
+            authkey=manager_password.encode()
+        )
         self.server_manager.connect()
 
         site = server.Site(StatsPage(self))

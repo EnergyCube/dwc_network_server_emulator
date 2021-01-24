@@ -5,6 +5,8 @@
     Copyright (C) 2014 AdmiralCurtiss
     Copyright (C) 2014 msoucy
     Copyright (C) 2015 Sepalani
+    Copyright (C) 2020 EnergyCube
+
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as
@@ -22,8 +24,14 @@
 
 import logging
 import time
-import BaseHTTPServer
-import SocketServer
+try:
+    # Python 2
+    import SocketServer
+    import BaseHTTPServer
+except ImportError:
+    # Python 3 PEP8 guidelines (all lowercase for module names)
+    import socketserver as SocketServer
+    import http.server as BaseHTTPServer
 import traceback
 
 from gamespy import gs_database
@@ -83,22 +91,43 @@ def handle_ac_login(handler, db, addr, post):
             "reason": "User banned."
         }
         logger.log(logging.DEBUG, "Login denied for banned user %s", str(post))
-    # Un-comment these lines to enable console registration feature
-    # elif not db.pending(post):
-    #     logger.log(logging.DEBUG, "Login denied - Unknown console %s", post)
-    #     ret = {
-    #         "retry": "1",
-    #         "returncd": "3921",
-    #         "locator": "gamespy.com",
-    #     }
-    # elif not db.registered(post):
-    #     logger.log(logging.DEBUG, "Login denied - console pending %s", post)
-    #     ret = {
-    #         "retry": "1",
-    #         "returncd": "3888",
-    #         "locator": "gamespy.com",
-    #     }
+    elif dwc_config.get_manual_activation():
+        if db.pending(post):
+            logger.log(logging.DEBUG, "Login denied - Console Pending %s", post)
+            ret = {
+                "retry": "1",
+                "returncd": "3888",
+                "locator": "gamespy.com",
+            }
+        elif not db.registered(post):
+            # Console not Pending & Console not Registered
+            # We need to add the console in the pending list
+            logger.log(
+                logging.DEBUG, "Login denied - Console Pending (First Connection) %s", post)
+            ret = {
+                "retry": "1",
+                "returncd": "3888",
+                "locator": "gamespy.com",
+            }
+            db.onhold(post)
+        else:
+            challenge = utils.generate_random_str(8)
+            post["challenge"] = challenge
+
+            authtoken = db.generate_authtoken(post["userid"], post)
+            ret = {
+                "retry": "0",
+                "returncd": "001",
+                "locator": "gamespy.com",
+                "challenge": challenge,
+                "token": authtoken,
+            }
+
+            logger.log(logging.DEBUG, "Login response to %s:%d", *addr)
+            logger.log(logging.DEBUG, "%s", ret)
     else:
+        if dwc_config.get_auto_console_activation() and not db.registered(post):
+            db.register(post)
         challenge = utils.generate_random_str(8)
         post["challenge"] = challenge
 
@@ -115,7 +144,6 @@ def handle_ac_login(handler, db, addr, post):
         logger.log(logging.DEBUG, "%s", ret)
 
     return ret
-
 
 def handle_ac_svcloc(handler, db, addr, post):
     """Handle ac svcloc request."""
@@ -252,7 +280,7 @@ class NasHTTPServerHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             if ret is not None:
                 self.send_header("Content-Length", str(len(ret)))
                 self.end_headers()
-                self.wfile.write(ret)
+                self.wfile.write(ret.encode())
         except:
             logger.log(logging.ERROR, "Exception occurred on POST request!")
             logger.log(logging.ERROR, "%s", traceback.format_exc())

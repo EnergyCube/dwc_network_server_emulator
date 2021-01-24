@@ -122,8 +122,10 @@ class GameSpyBackendServer(object):
                    "Started server on %s:%d...",
                    address[0], address[1])
 
-        manager = GameSpyServerDatabase(address=address,
-                                        authkey=password)
+        manager = GameSpyServerDatabase(
+            address=address,
+            authkey=password.encode()
+        )
         server = manager.get_server()
         server.serve_forever()
 

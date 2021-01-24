@@ -4,6 +4,7 @@
     Copyright (C) 2014 kyle95wm
     Copyright (C) 2014 AdmiralCurtiss
     Copyright (C) 2015 Sepalani
+    Copyright (C) 2020 EnergyCube
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as
@@ -40,7 +41,10 @@ _, port = dwc_config.get_ip_port('AdminPage')
 
 # Example of adminpageconf.json
 #
-# {"username":"admin","password":"opensesame"}
+# {
+#     "username": "yourusername",
+#     "password": "yourstrongpassword"
+# }
 #
 # NOTE: Must use double-quotes or json module will fail
 # NOTE2: Do not check the .json file into public git!
@@ -49,9 +53,13 @@ adminpageconf = None
 admin_username = None
 admin_password = None
 
-if os.path.exists('adminpageconf.json'):
+# For some unknown reason, we need to specify the absolute location of the file,
+# otherwise it will be impossible to read the file sometimes.
+thisfolder = os.path.dirname(os.path.abspath(__file__))
+initfile = os.path.join(thisfolder, 'adminpageconf.json')
+if os.path.exists(initfile):
     try:
-        adminpageconf = json.loads(file('adminpageconf.json').read().strip())
+        adminpageconf = json.loads(open(initfile).read().strip())
         admin_username = str(adminpageconf['username'])
         admin_password = str(adminpageconf['password'])
     except Exception as e:
@@ -76,21 +84,26 @@ class AdminPage(resource.Resource):
 
     def get_header(self, title=None):
         if not title:
-            title = 'AltWfc Admin Page'
+            title = '%s Admin Page' % (dwc_config.get_server_name())
         s = """
         <html>
         <head>
             <title>%s</title>
         </head>
         <body>
+            <strong>
+                %s
+            </strong>
             <p>
-                %s | %s | %s
+                %s | %s | %s | %s
             </p>
         """ % (title,
+                title,
                '<a href="/banhammer">All Users</a>',
                '<a href="/consoles">Consoles</a>',
-               '<a href="/banlist">Active Bans</a>')
-        return s
+               '<a href="/banlist">Active Bans</a>',
+               '<a href="/settings">Server Settings</a>')
+        return bytes(s, 'utf-8') 
 
     def get_footer(self):
         s = """
@@ -138,24 +151,51 @@ class AdminPage(resource.Resource):
 
         # This strips the region identifier from game IDs, not sure if this
         # actually always accurate but limited testing suggests it is
+        # This also alow us to use 'ALL' as a global server gameid
         if len(gameid) > 3:
             gameid = gameid[:-1]
 
-        if actiontype == 'ban':
+        if actiontype == 'game_ban':
             dbconn.cursor().execute(
-                'INSERT INTO banned VALUES(?,?)',
+                "INSERT INTO banned VALUES(?,?)",
                 (gameid, ipaddr)
             )
-            responsedata = "Added gameid=%s, ipaddr=%s" % (gameid, ipaddr)
-        else:
+            responsedata = "Added gameid=%s, id=%s" % (gameid, ipaddr)
+        elif actiontype == 'server_ban':
+            if dwc_config.get_server_ban_overwrite_game_ban():
+                dbconn.cursor().execute(
+                    "DELETE FROM banned WHERE id=?",
+                    (ipaddr,)
+                )
+                responsedata_ = "Removed all specific game ban for id=%s" % (ipaddr)
             dbconn.cursor().execute(
-                'DELETE FROM banned WHERE gameid=? AND ipaddr=?',
+                "INSERT INTO banned VALUES(?,?)",
+                ("ALL", ipaddr)
+            )
+            responsedata = "Added gameid=ALL, id=%s" % (ipaddr)
+        elif actiontype == "game_unban":
+            dbconn.cursor().execute(
+                "DELETE FROM banned WHERE gameid=? AND id=?",
                 (gameid, ipaddr)
             )
-            responsedata = "Removed gameid=%s, ipaddr=%s" % (gameid, ipaddr)
+            responsedata = "Removed gameid=%s, id=%s" % (gameid, ipaddr)
+        elif actiontype == "server_unban":
+            if dwc_config.get_server_ban_overwrite_game_ban():
+                dbconn.cursor().execute(
+                    "DELETE FROM banned WHERE id=?",
+                    (ipaddr,)
+                )
+                responsedata_ = "Removed all specific game ban for id=%s" % (ipaddr)
+            dbconn.cursor().execute(
+                "DELETE FROM banned WHERE gameid=? AND id=?",
+                ("ALL", ipaddr)
+            )
+            responsedata = "Removed gameid=ALL, id=%s" % (ipaddr)
         dbconn.commit()
         dbconn.close()
         logger.log(logging.INFO, "%s %s", address, responsedata)
+        if not 'responsedata_':
+            logger.log(logging.INFO, "%s %s", address, responsedata_)
         request.setHeader("Content-Type", "text/html; charset=utf-8")
 
         referer = request.getHeader('referer')
@@ -164,7 +204,7 @@ class AdminPage(resource.Resource):
         request.setHeader("Location", referer)
 
         request.setResponseCode(303)
-        return responsedata
+        return bytes(responsedata, 'utf-8') 
 
     def update_consolelist(self, request):
         address = request.getClientIP()
@@ -213,7 +253,7 @@ class AdminPage(resource.Resource):
         request.setHeader("Location", referer)
 
         request.setResponseCode(303)
-        return responsedata
+        return bytes(responsedata, 'utf-8')
 
     def render_banlist(self, request):
         address = request.getClientIP()
@@ -239,16 +279,16 @@ class AdminPage(resource.Resource):
                 <form action='updatebanlist' method='POST'>
                     <input type='hidden' name='gameid' value='%s'>
                     <input type='hidden' name='ipaddr' value='%s'>
-                    <input type='hidden' name='action' value='unban'>
-                    <input type='submit' value='----- UNBAN -----'>
+                    <input type='hidden' name='action' value='game_unban'>
+                    <input type='submit' value='--- UNBAN for %s ---'>
                 </form>
                 </td>
-            </tr>""" % (gameid, ipaddr, gameid, ipaddr)
+            </tr>""" % (gameid, ipaddr, gameid, ipaddr, gameid)
 
         responsedata += "</table>"
         dbconn.close()
         request.setHeader("Content-Type", "text/html; charset=utf-8")
-        return responsedata
+        return bytes(responsedata, 'utf-8')
 
     def render_not_available(self, request):
         request.setResponseCode(403)
@@ -293,6 +333,8 @@ class AdminPage(resource.Resource):
             enabled = str(row[1])
             nasdata = collections.defaultdict(lambda: '', json.loads(row[2]))
             gameid = str(row[3])
+            if len(gameid) > 3:
+                gameid = gameid[:-1]
             is_console = int(str(row[4]))
             userid = str(row[5])
             gsbrcd = str(nasdata['gsbrcd'])
@@ -326,34 +368,52 @@ class AdminPage(resource.Resource):
                    gsbrcd,
                    userid,
                    ipaddr)
-            if gameid[:-1] + ":" + ipaddr in banned_list:
+            if gameid + ":" + ipaddr in banned_list:
                 responsedata += """
                     <td>
                     <form action='updatebanlist' method='POST'>
                         <input type='hidden' name='gameid' value='%s'>
                         <input type='hidden' name='ipaddr' value='%s'>
-                        <input type='hidden' name='action' value='unban'>
-                        <input type='submit' value='----- unban -----'>
-                    </form>
-                    </td>
-                </tr>""" % (gameid, ipaddr)
+                        <input type='hidden' name='action' value='game_unban'>
+                        <input type='submit' value='%s UnBan'>
+                    </form>                   
+                    </td>""" % (gameid, ipaddr, gameid)
             else:
                 responsedata += """
                     <td>
                     <form action='updatebanlist' method='POST'>
                         <input type='hidden' name='gameid' value='%s'>
                         <input type='hidden' name='ipaddr' value='%s'>
-                        <input type='hidden' name='action' value='ban'>
-                        <input type='submit' value='Ban'>
+                        <input type='hidden' name='action' value='game_ban'>
+                        <input type='submit' value='%s Ban'>
                     </form>
                     </td>
-                </tr>
-                """ % (gameid, ipaddr)
+                """ % (gameid, ipaddr, gameid)
+            if "ALL:" + ipaddr in banned_list:
+                responsedata += """
+                    <td>
+                    <form action='updatebanlist' method='POST'>
+                        <input type='hidden' name='gameid' value='%s'>
+                        <input type='hidden' name='ipaddr' value='%s'>
+                        <input type='hidden' name='action' value='server_unban'>
+                        <input type='submit' value='Server UnBan'>
+                    </form>                   
+                    </td>""" % (gameid, ipaddr)
+            else:
+                responsedata += """
+                    <td>
+                    <form action='updatebanlist' method='POST'>
+                        <input type='hidden' name='gameid' value='%s'>
+                        <input type='hidden' name='ipaddr' value='%s'>
+                        <input type='hidden' name='action' value='server_ban'>
+                        <input type='submit' value='Server Ban'>
+                    </form>                   
+                    </td>""" % (gameid, ipaddr)
 
-        responsedata += "</table>"
+        responsedata += "</tr></table>"
         dbconn.close()
         request.setHeader("Content-Type", "text/html; charset=utf-8")
-        return responsedata.encode('utf-8')
+        return bytes(responsedata, 'utf-8')
 
     def enable_disable_user(self, request, enable=True):
         address = request.getClientIP()
@@ -391,9 +451,28 @@ class AdminPage(resource.Resource):
         request.setHeader("Content-Type", "text/html; charset=utf-8")
         request.setHeader("Location", "/banhammer")
         request.setResponseCode(303)
-        return responsedata
+        return bytes(responsedata, 'utf-8')
 
-    def render_consolelist(self, request):
+    def render_pending_consolemenu(self, request):
+        dbconn = sqlite3.connect('gpcm.db')
+        responsedata = (
+            '<p> %s | %s | %s </p>'
+            '<a href="http://%20:%20@' + request.getHeader('host') +
+            '>[CLICK HERE TO LOG OUT]</a>'
+            "<form action='updateconsolelist' method='POST'>"
+            "macadr:<input type='text' name='macadr'>\r\n"
+            "<input type='hidden' name='action' value='add'>\r\n"
+            "<input type='submit' value='Register and activate console'>"
+            "</form>\r\n" 
+                %('<a href="/consoles/pending">Pending</a>',
+                    '<a href="/consoles/registered">Registered</a>',
+                    '<a href="/consoles/all">All</a></br>')
+        )
+        dbconn.close()
+        request.setHeader("Content-Type", "text/html; charset=utf-8")
+        return bytes(responsedata, 'utf-8')
+
+    def render_pending_consolelist(self, request):
         address = request.getClientIP()
         dbconn = sqlite3.connect('gpcm.db')
         active_list = []
@@ -402,7 +481,7 @@ class AdminPage(resource.Resource):
         logger.log(logging.INFO, "%s Viewed console list", address)
         responsedata = (
             '<a href="http://%20:%20@' + request.getHeader('host') +
-            '">[CLICK HERE TO LOG OUT]</a>'
+            '>[CLICK HERE TO LOG OUT]</a>'
             "<form action='updateconsolelist' method='POST'>"
             "macadr:<input type='text' name='macadr'>\r\n"
             "<input type='hidden' name='action' value='add'>\r\n"
@@ -440,7 +519,7 @@ class AdminPage(resource.Resource):
         responsedata += "</table>"
         dbconn.close()
         request.setHeader("Content-Type", "text/html; charset=utf-8")
-        return responsedata
+        return bytes(responsedata, 'utf-8')
 
     def render_GET(self, request):
         if not adminpageconf:
@@ -452,14 +531,24 @@ class AdminPage(resource.Resource):
         title = None
         response = ''
         if request.path == "/banlist":
-            title = 'AltWfc Banned Users'
+            title = '%s Banned Users' % (dwc_config.get_server_name())
             response = self.render_banlist(request)
         elif request.path == "/banhammer":
-            title = 'AltWfc Users'
+            title = '%s Users' % (dwc_config.get_server_name())
             response = self.render_blacklist(request)
         elif request.path == "/consoles":
-            title = "AltWfc Console List"
-            response = self.render_consolelist(request)
+            title = "%s Console List Menu" % (dwc_config.get_server_name())
+            response = self.render_pending_consolemenu(request)
+        elif request.path == "/consoles/registered":
+            title = "%s Pending Console List" % (dwc_config.get_server_name())
+            response = self.render_pending_consolelist(request)
+        elif request.path == "/consoles/pending":
+            title = "%s Pending Console List" % (dwc_config.get_server_name())
+            response = self.render_pending_consolelist(request)
+        elif request.path == "/consoles/all":
+            title = "%s Pending Console List" % (dwc_config.get_server_name())
+            response = self.render_pending_consolelist(request)
+
         return self.get_header(title) + response + self.get_footer()
 
     def render_POST(self, request):

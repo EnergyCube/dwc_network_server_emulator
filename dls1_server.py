@@ -21,8 +21,14 @@
 """
 
 import logging
-import BaseHTTPServer
-import SocketServer
+try:
+    # Python 2
+    import SocketServer
+    import BaseHTTPServer
+except ImportError:
+    # Python 3 PEP8 guidelines (all lowercase for module names)
+    import socketserver as SocketServer
+    import http.server as BaseHTTPServer
 import os
 import traceback
 

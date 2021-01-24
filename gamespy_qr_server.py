@@ -30,7 +30,12 @@ import socket
 import struct
 import threading
 import time
-import Queue
+try:
+    # Python 2
+    import Queue
+except ImportError:
+    # Python 3 PEP8 guidelines (all lowercase for module names)
+    import queue as Queue
 import traceback
 
 from multiprocessing.managers import BaseManager
@@ -98,7 +103,7 @@ class GameSpyQRServer(object):
 
             self.server_manager = GameSpyServerDatabase(
                 address=manager_address,
-                authkey=manager_password
+                authkey=manager_password.encode()
             )
             self.server_manager.connect()
 
@@ -386,7 +391,7 @@ class GameSpyQRServer(object):
                         # base64 string anyway)
                         self.sessions[session_id].ingamesn = \
                             str(naslogin['ingamesn'])
-                    except Exception, e:
+                    except Exception:
                         # If the game doesn't have, don't worry about it.
                         pass
 

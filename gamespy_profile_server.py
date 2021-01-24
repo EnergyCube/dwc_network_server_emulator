@@ -5,6 +5,7 @@
     Copyright (C) 2014 AdmiralCurtiss
     Copyright (C) 2014 msoucy
     Copyright (C) 2015 Sepalani
+    Copyright (C) 2020 EnergyCube
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as
@@ -156,7 +157,7 @@ class PlayerSession(LineReceiver):
             ])
 
             self.log(logging.DEBUG, "SENDING: '%s'...", msg)
-            self.transport.write(bytes(msg))
+            self.transport.write(bytes(msg.encode()))
         except:
             self.log(logging.ERROR,
                      "Unknown exception: %s",
@@ -190,7 +191,7 @@ class PlayerSession(LineReceiver):
             # stored in the variable remaining_message. On the next
             # rawDataReceived command, the remaining message and the data
             # are combined to create a full command.
-            data = self.remaining_message + data
+            data = str.encode(self.remaining_message).decode() + data.decode()
 
             # Check to make sure the data buffer starts with a valid command.
             if len(data) > 0 and data[0] != '\\':
@@ -200,10 +201,26 @@ class PlayerSession(LineReceiver):
                 # \final\ is not in the command string then ignore it.
                 final = "\\final\\"
                 data = data[data.index(final) + len(final):] \
-                    if final in data else ""
+                    if final.encode() in data.decode() else ""
 
             commands, self.remaining_message = \
                 gs_query.parse_gamespy_message(data)
+
+            # We check if the data sender ipadr is banned
+            # macadr is set to 'N/A' since idk how recover it actually
+            # TODO
+            if self.db.is_banned(
+                    {
+                        'ipaddr': self.address.host,
+                        'macadr': 'N/A',
+                        'gamecd': self.gameid
+                    }):
+                self.log(
+                    logging.DEBUG,
+                    "Banned user, closing network socket for IP : %s:%s MAC : %s..."
+                    % (self.address.host, self.address.port, 'N/A'))
+                self.transport.abortConnection()
+                return
 
             cmds = {
                 "login": self.perform_login,
@@ -347,7 +364,7 @@ class PlayerSession(LineReceiver):
             self.profileid = int(profileid)
 
             self.log(logging.DEBUG, "SENDING: %s", msg)
-            self.transport.write(bytes(msg))
+            self.transport.write(bytes(msg.encode()))
 
             # Get pending messages.
             self.get_pending_messages()
@@ -430,14 +447,14 @@ class PlayerSession(LineReceiver):
         self.transport.write(bytes(msg))
 
     def perform_updatepro(self, data_parsed):
-        """Wii example:
-        \updatepro\\sesskey\199714190\firstname\Wii:2555151656076614@WR9E
-        \partnerid\11\final\
+        # Wii example:
+        # \updatepro\\sesskey\199714190\firstname\Wii:2555151656076614@WR9E
+        # \partnerid\11\final\
 
-        Remove any fields not related to what we should be updating.
-        To avoid any crashes, make sure the key is actually in the dictionary
-        before removing it.
-        """
+        # Remove any fields not related to what we should be updating.
+        # To avoid any crashes, make sure the key is actually in the dictionary
+        # before removing it.
+
         if "__cmd__" in data_parsed:
             data_parsed.pop('__cmd__')
         if "__cmd_val__" in data_parsed:
@@ -460,7 +477,7 @@ class PlayerSession(LineReceiver):
             ('__cmd__', "ka"),
             ('__cmd_val__', ""),
         ])
-        self.transport.write(msg)
+        self.transport.write(msg.encode())
 
     def perform_status(self, data_parsed):
         self.sesskey = data_parsed['sesskey']

@@ -4,6 +4,7 @@
     Copyright (C) 2014 ToadKing
     Copyright (C) 2014 AdmiralCurtiss
     Copyright (C) 2015 Sepalani
+    Copyright (C) 2020 EnergyCube
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as
@@ -21,10 +22,15 @@
 
 import sqlite3
 import hashlib
-import itertools
 import json
 import time
 import logging
+import time
+# iZip is only available in Python 2
+try:
+    from itertools import izip as zip
+except ImportError: 
+    pass
 from contextlib import closing
 
 import other.utils as utils
@@ -60,12 +66,21 @@ class Transaction(object):
                                  statement.replace('?', '%s') % parameters)
 
         timeStart = time.time()
-        clockStart = time.clock()
+        # time.clock() is only available in Python 2
+        try:
+            clockStart = time.clock()
+        except:
+            clockStart = time.process_time()
 
         cursor.execute(statement, parameters)
 
-        clockEnd = time.clock()
-        timeEnd = time.time()
+        try:
+            clockEnd = time.clock()
+            timeEnd = time.clock()
+        except:
+            clockEnd = time.process_time()
+            timeEnd = time.process_time()
+
         timeDiff = timeEnd - timeStart
 
         logger.log(SQL_LOGLEVEL,
@@ -150,7 +165,7 @@ class GamespyDatabase(object):
             tx.nonquery("CREATE TABLE IF NOT EXISTS nas_logins"
                         " (userid TEXT, authtoken TEXT, data TEXT)")
             tx.nonquery("CREATE TABLE IF NOT EXISTS banned"
-                        " (gameid TEXT, ipaddr TEXT)")
+                        " (gameid TEXT, id TEXT)")
             tx.nonquery("CREATE TABLE IF NOT EXISTS pending (macadr TEXT)")
             tx.nonquery("CREATE TABLE IF NOT EXISTS registered (macadr TEXT)")
 
@@ -189,7 +204,7 @@ class GamespyDatabase(object):
         if not row:
             return None
 
-        return dict(itertools.izip(row.keys(), row))
+        return dict(zip(row.keys(), row))
 
     # User functions
     def get_next_free_profileid(self):
@@ -500,11 +515,18 @@ class GamespyDatabase(object):
 
     def is_banned(self, postdata):
         with Transaction(self.conn) as tx:
-            row = tx.queryone(
-                "SELECT COUNT(*) FROM banned WHERE gameid = ? AND ipaddr = ?",
-                (postdata['gamecd'][:-1], postdata['ipaddr'])
+            # Ban for GameID 'ALL' = Ban for the whole Server
+            row_server = tx.queryone(
+                "SELECT COUNT(*) FROM banned WHERE gameid = 'ALL' AND id = ? OR id = ?",
+                (postdata['ipaddr'], postdata['macadr'])
             )
-        return int(row[0]) > 0
+            if len(postdata['gamecd']) > 3:
+                postdata['gamecd'] = postdata['gamecd'][:-1]
+            row_game = tx.queryone(
+                "SELECT COUNT(*) FROM banned WHERE gameid = ? AND id = ? OR id = ?",
+                (postdata['gamecd'], postdata['ipaddr'], postdata['macadr'])
+            )
+        return int(row_server[0]) + int(row_game[0]) > 0
 
     def pending(self, postdata):
         with Transaction(self.conn) as tx:
@@ -521,6 +543,24 @@ class GamespyDatabase(object):
                 (postdata['macadr'],)
             )
             return int(row[0]) > 0
+			
+    def register(self, postdata):
+        with Transaction(self.conn) as tx:
+            tx.nonquery(
+                "INSERT INTO registered (macadr) VALUES (?)",
+                (postdata['macadr'],)
+            )
+            tx.nonquery(
+                "DELETE FROM pending WHERE macadr = ?",
+                (postdata['macadr'],)
+            )
+
+    def onhold(self, postdata):
+        with Transaction(self.conn) as tx:
+            tx.nonquery(
+                "INSERT INTO pending (macadr) VALUES (?)",
+                (postdata['macadr'],)
+            )
 
     def get_next_available_userid(self):
         with Transaction(self.conn) as tx:
@@ -568,9 +608,9 @@ class GamespyDatabase(object):
             r = self.get_dict(row)
 
         if "devname" in data:
-            data["devname"] = gs_utils.base64_encode(data["devname"])
+            data["devname"] = gs_utils.base64_encode(data["devname"]).decode()
         if "ingamesn" in data:
-            data["ingamesn"] = gs_utils.base64_encode(data["ingamesn"])
+            data["ingamesn"] = gs_utils.base64_encode(data["ingamesn"]).decode()
 
         data = json.dumps(data)
 

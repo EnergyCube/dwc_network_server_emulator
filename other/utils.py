@@ -20,11 +20,17 @@
 
 import base64
 import logging
+from functools import reduce
 import logging.handlers
 import random
 import string
 import struct
-import urlparse
+try:
+    # Python 2
+    import urlparse
+except ImportError:
+    # Python 3
+    import urllib.parse as urlparse
 import ctypes
 import os
 
@@ -121,7 +127,7 @@ def get_num_from_bytes(data, idx, fmt, bigEndian=False):
 
     Endianness by default is little.
     """
-    return struct.unpack_from("<>"[bigEndian] + fmt, buffer(bytearray(data)), idx)[0]
+    return struct.unpack_from("<>"[bigEndian] + fmt, memoryview(bytearray(data)), idx)[0]
 
 # Instead of passing slices, pass the buffer and index so we can calculate
 # the length automatically.
@@ -291,9 +297,9 @@ def print_hex(data, cols=16, sep=' ', pretty=True):
     Can be pretty printed but takes more time.
     """
     if pretty:
-        print pretty_print_hex(data, cols, sep)
+        print(pretty_print_hex(data, cols, sep))
     else:
-        print sep.join("%02x" % b for b in bytearray(data))
+        print(sep.join("%02x" % b for b in bytearray(data)))
 
 
 def pretty_print_hex(orig_data, cols=16, sep=' '):
@@ -360,7 +366,21 @@ def pretty_print_hex(orig_data, cols=16, sep=' '):
 
 def qs_to_dict(s):
     """Convert query string to dict."""
-    ret = urlparse.parse_qs(s, True)
+
+    # Ex Good Format
+    # action=bG9naW4%2A
+    # &gsbrcd=Uk1DSjI1b3NvcWQ%2A
+    # &userid=MDAwMDAwMDAwMDAwMg%2A%2A
+    # &ingamesn=AFYAaQBuAGMAZQBuAHQ%2A
+    # &sdkver=MDAxMDAw&gamecd=Uk1DUA%2A%2A
+    # &makercd=MDE%2A&unitcd=MQ%2A%2A
+    # &macadr=MDAxN2FiOWMxNTM4&lang=MDM%2A
+    # &devtime=MjAxMTE0MDcwNzAy
+    # &csnum=TEVIMzA0MjAzNDA0
+    # &cfc=Mjc5MDQ5MTU3ODg5NTg5OQ%2A%2A
+    # &region=MDI%2A
+
+    ret = urlparse.parse_qs(urlparse.unquote(s.decode()), keep_blank_values=True)
 
     for k, v in ret.items():
         try:
@@ -368,11 +388,12 @@ def qs_to_dict(s):
             # least let it be decoded.
             # For the most part it's not important since it's mostly
             # used for the devname/ingamesn fields.
+
             ret[k] = base64.b64decode(urlparse.unquote(v[0])
-                                              .replace("*", "=")
-                                              .replace("?", "/")
-                                              .replace(">", "+")
-                                              .replace("-", "/"))
+                                                .replace("*", "=")
+                                                .replace("?", "/")
+                                                .replace(">", "+")
+                                                .replace("-", "/")).decode()
         except TypeError:
             """
             print("Could not decode following string: ret[%s] = %s"
@@ -393,6 +414,32 @@ def dict_to_qs(d):
     use encoding for special characters.
     """
     # Dictionary comprehension is used to not modify the original
-    ret = {k: base64.b64encode(v).replace("=", "*") for k, v in d.items()}
+    # Ex Good Format
+    # {'retry': 'MA**', 'challenge': 'eU4weTVBUFk*', 
+    # 'datetime': 'MjAyMDExMTQyMTA5NDM*', 'locator': 'Z2FtZXNweS5jb20*',
+    # 'token': 'TkRTSGZnSzQxdWJ0bkN4VUk1eWFFYlZTRFBoOWxsd25YREh4ekpJSXQw
+    # ZEtzRWFMN2tPaVBQMG5Cd1NxdmRxSjl3Mjlpa1VyV2ZMSW9EbnVpMUs*',
+    # 'returncd': 'MDAx'}
+    
+    # Urlparse.urlencode = 
+    # retry=0
+    # &returncd=001
+    # &locator=gamespy.com
+    # &challenge=54eQDb7F
+    # &token=NDSABdRdnZsXeOqgCYIVA4Q2S0n9jgBmnK1syKeu7kbLhyKhIHtnMyMo0Znx
+    # SuCtlmiF2JiFaxKevEISdGO
+    # &datetime=20201114222348
 
+    #   ret = {k: base64.b64encode(v).replace("=", "*") for k, v in d.items()}
+    #   return "&".join("{!s}={!s}".format(k, v) for k, v in ret.items()) + "\r\n"
+
+    # PTN1 {'locator': 'gamespy.com', 'token': 'X', 'retry': '0', 'returncd': '001', 'challenge': 'TnloUGRy', 'datetime': '20201114223555'}
+    # retry=MA**&challenge=VG5sb1VHUnk*&datetime=MjAyMDExMTQyMjM1NTU*&locator=Z2FtZXNweS5jb20*&token=X*&returncd=MDAx\r\n
+
+    # PTN1 {'retry': '0', 'returncd': '001', 'locator': 'gamespy.com', 'challenge': 'gfJ9TE8d', 'token': 'X', 'datetime': '20201115034338'}
+
+    # retry=0&returncd=001&locator=gamespy.com&challenge=xDpHYFQk&token=X&datetime=20201115151159
+
+    ret = {k: base64.b64encode(str.encode(v)).decode().replace("=", "*") for k, v in d.items()}
     return "&".join("{!s}={!s}".format(k, v) for k, v in ret.items()) + "\r\n"
+
